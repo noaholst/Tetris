@@ -631,7 +631,13 @@ public class GameController : MonoBehaviour
         ProcessFalling(fixedDeltaTime);
 
         playTime += fixedDeltaTime;
+        // Award survival reward while actively playing.
+        TetrisAgent agent = GetComponent<TetrisAgent>();
 
+        if (agent != null)
+        {
+            agent.RewardSurvivalTime(fixedDeltaTime);
+        }   
         UpdateLevel();
 
         UpdateTimeUI();
@@ -1606,6 +1612,14 @@ public class GameController : MonoBehaviour
             restartButton.SetActive(true);
 
         UpdateUI();
+
+    // Notify the ML-Agents agent that the game has ended.
+    TetrisAgent agent = GetComponent<TetrisAgent>();
+
+    if (agent != null)
+    {
+        agent.NotifyGameOver();
+    }
     }
 
 
@@ -1836,7 +1850,16 @@ public class GameController : MonoBehaviour
     // ============================================================
     // RL / TRAINING HELPERS
     // ============================================================
+    public bool IsCellOccupied(int x, int y)
+    {
+        if (x < 0 || x >= Helper.WIDTH ||
+            y < 0 || y >= Helper.HEIGHT)
+        {
+            return false;
+        }
 
+        return grid[y, x] != null;
+    }
     public bool IsGameOver()
     {
         return gameOver;
