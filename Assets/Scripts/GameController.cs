@@ -80,6 +80,13 @@ public class GameController : MonoBehaviour
 
     private HashSet<int> deck = new HashSet<int>();
 
+    [Header("RL Piece Selection")]
+    [Tooltip("Indices in Blocks/Ghosts that should not be used. Set these to the L and J prefab indices.")]
+    [SerializeField] private int[] excludedBlockIndices = new int[0];
+
+    // Original prefab indices retained so Blocks, Ghosts and Pivots stay aligned.
+    private readonly List<int> availableBlockIndices = new List<int>();
+
     private Block[,] grid =
         new Block[Helper.HEIGHT, Helper.WIDTH];
 
@@ -380,6 +387,10 @@ public class GameController : MonoBehaviour
 
         ClearBoard();
 
+        // Reset the piece bag for a new game/episode and rebuild the allowed pool.
+        deck.Clear();
+        BuildAvailableBlockIndices();
+
         if (currBlock != null)
         {
             currBlock.Destroy();
@@ -517,20 +528,64 @@ public class GameController : MonoBehaviour
     // NEXT BLOCK
     // ============================================================
 
-    private void NextBlock()
+    private void BuildAvailableBlockIndices()
     {
-        if (Blocks == null || Blocks.Length == 0)
+        availableBlockIndices.Clear();
+
+        if (Blocks == null)
             return;
 
-        if (deck.Count == Blocks.Length)
-            deck.Clear();
-
-        do
+        for (int i = 0; i < Blocks.Length; i++)
         {
-            nextBlock = Random.Range(0, Blocks.Length);
-        }
-        while (deck.Contains(nextBlock));
+            bool excluded = false;
 
+            if (excludedBlockIndices != null)
+            {
+                for (int j = 0; j < excludedBlockIndices.Length; j++)
+                {
+                    if (excludedBlockIndices[j] == i)
+                    {
+                        excluded = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!excluded && Blocks[i] != null)
+                availableBlockIndices.Add(i);
+        }
+    }
+
+
+    private void NextBlock()
+    {
+        if (Blocks == null || availableBlockIndices.Count == 0)
+        {
+            Debug.LogError(
+                "GameController: No valid Tetris pieces are available. Check Blocks and excludedBlockIndices.",
+                this
+            );
+            return;
+        }
+
+        // Each allowed piece appears once before the bag repeats.
+        List<int> candidates = new List<int>();
+
+        for (int i = 0; i < availableBlockIndices.Count; i++)
+        {
+            int blockIndex = availableBlockIndices[i];
+
+            if (!deck.Contains(blockIndex))
+                candidates.Add(blockIndex);
+        }
+
+        if (candidates.Count == 0)
+        {
+            deck.Clear();
+            candidates.AddRange(availableBlockIndices);
+        }
+
+        nextBlock = candidates[Random.Range(0, candidates.Count)];
         deck.Add(nextBlock);
 
         if (nextBlockObject != null)
@@ -1174,6 +1229,7 @@ public class GameController : MonoBehaviour
 
     private void CheckForLines()
     {
+        TetrisAgent agent = GetComponent<TetrisAgent>();
         deletingRow.Clear();
 
         for (
@@ -1190,6 +1246,11 @@ public class GameController : MonoBehaviour
 
         if (deletingRow.Count == 0)
         {
+            // The piece is locked and no rows need to move.
+            // Evaluate the settled board exactly once for this placement.
+            if (agent != null)
+                agent.EvaluateBoardQuality();
+
             isAnimating = false;
             isShowingAnimation = false;
             isEndTurn = false;
@@ -1202,6 +1263,11 @@ public class GameController : MonoBehaviour
 
         int lineCount =
             deletingRow.Count;
+
+        // Award line-clear reward once for this piece placement.
+        
+        if (agent != null)
+            agent.RewardLinesCleared(lineCount);
 
         score +=
             scores[lineCount] *
@@ -1455,6 +1521,11 @@ public class GameController : MonoBehaviour
         deletingRow.Clear();
 
         isRowDown = false;
+
+        // Evaluate height and holes after the board has been compacted.
+        TetrisAgent agent = GetComponent<TetrisAgent>();
+        if (agent != null)
+            agent.EvaluateBoardQuality();
     }
 
 
@@ -1936,7 +2007,21 @@ public class GameController : MonoBehaviour
 
     public int GetNextBlock()
     {
+        // Original prefab index used internally by Blocks/Ghosts/Pivots.
         return nextBlock;
+    }
+
+
+    public int GetNextBlockObservationIndex()
+    {
+        // Compact index from 0 to allowed-piece-count - 1 for ML-Agents.
+        return availableBlockIndices.IndexOf(nextBlock);
+    }
+
+
+    public int GetAvailableBlockCount()
+    {
+        return availableBlockIndices.Count;
     }
 }
 

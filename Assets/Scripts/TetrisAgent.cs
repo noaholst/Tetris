@@ -12,6 +12,22 @@ public class TetrisAgent : Agent
 
     [Header("Survival Reward")]
     [SerializeField] private float survivalRewardPerSecond = 0.001f;
+    
+    [Header("Line Clear Rewards")]
+    [SerializeField] private float singleLineReward = 0.5f;
+    [SerializeField] private float doubleLineReward = 1.5f;
+    [SerializeField] private float tripleLineReward = 3.0f;
+    [SerializeField] private float tetrisReward = 5.0f;
+    
+    [Header("Board Quality Penalties")]
+    [Tooltip("Penalty applied for each row that the maximum stack height increases.")]
+    [SerializeField] private float heightPenaltyPerRow = 0.02f;
+
+    [Tooltip("Penalty applied for each newly created hole.")]
+    [SerializeField] private float holePenalty = 0.2f;
+
+    private int previousMaxHeight;
+    private int previousHoleCount;
 
     public override void Initialize()
     {
@@ -41,6 +57,8 @@ public class TetrisAgent : Agent
         hasStartedEpisode = true;
         Debug.Log("[TetrisAgent] First episode started.");
     }
+    
+    ResetBoardQualityTracking();
 }
 
     public override void CollectObservations(VectorSensor sensor)
@@ -80,7 +98,7 @@ public class TetrisAgent : Agent
     // 3. Next piece identity: 7 one-hot observations.
     int nextBlock = gameController.GetNextBlock();
 
-    for (int i = 0; i < 7; i++)
+    for (int i = 0; i < 5; i++)
     {
         sensor.AddObservation(nextBlock == i ? 1f : 0f);
     }
@@ -109,5 +127,107 @@ public class TetrisAgent : Agent
                 survivalRewardPerSecond * elapsedSeconds
             );
         }
+    }
+    
+    public void RewardLinesCleared(int lines)
+    {
+        switch (lines)
+        {
+            case 1:
+                AddReward(singleLineReward);
+                break;
+
+            case 2:
+                AddReward(doubleLineReward);
+                break;
+
+            case 3:
+                AddReward(tripleLineReward);
+                break;
+
+            case 4:
+                AddReward(tetrisReward);
+                break;
+        }
+    }
+    
+    public void ResetBoardQualityTracking()
+    {
+        if (gameController == null)
+        {
+            previousMaxHeight = 0;
+            previousHoleCount = 0;
+            return;
+        }
+
+        previousMaxHeight = CalculateMaxHeight();
+        previousHoleCount = CalculateHoleCount();
+    }
+    
+    private int CalculateMaxHeight()
+    {
+        int maxHeight = 0;
+
+        for (int x = 0; x < Helper.WIDTH; x++)
+        {
+            for (int y = Helper.HEIGHT - 1; y >= 0; y--)
+            {
+                if (gameController.IsCellOccupied(x, y))
+                {
+                    maxHeight = Mathf.Max(maxHeight, y + 1);
+                    break;
+                }
+            }
+        }
+
+        return maxHeight;
+    }
+    
+    private int CalculateHoleCount()
+    {
+        int holes = 0;
+
+        for (int x = 0; x < Helper.WIDTH; x++)
+        {
+            bool foundBlockAbove = false;
+
+            for (int y = Helper.HEIGHT - 1; y >= 0; y--)
+            {
+                if (gameController.IsCellOccupied(x, y))
+                {
+                    foundBlockAbove = true;
+                }
+                else if (foundBlockAbove)
+                {
+                    holes++;
+                }
+            }
+        }
+
+        return holes;
+    }
+    
+    public void EvaluateBoardQuality()
+    {
+        if (gameController == null)
+            return;
+
+        int currentHeight = CalculateMaxHeight();
+        int currentHoles = CalculateHoleCount();
+
+        // Penalize only increases in the maximum stack height.
+        int heightIncrease = currentHeight - previousMaxHeight;
+
+        if (heightIncrease > 0)
+            AddReward(-heightIncrease * heightPenaltyPerRow);
+
+        // Penalize only holes newly created by this placement.
+        int newHoles = currentHoles - previousHoleCount;
+
+        if (newHoles > 0)
+            AddReward(-newHoles * holePenalty);
+
+        previousMaxHeight = currentHeight;
+        previousHoleCount = currentHoles;
     }
 }
